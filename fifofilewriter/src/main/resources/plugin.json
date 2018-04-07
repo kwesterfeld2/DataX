@@ -1,0 +1,6 @@
+{
+    "name": "fifofilewriter",
+    "class": "com.alibaba.datax.plugin.writer.fifofilewriter.FifoFileWriter",
+    "description": "useScene: test. mechanism: use datax framework to transport data to txt files (one file per split)",
+    "developer": "yb"
+}

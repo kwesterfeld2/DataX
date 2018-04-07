@@ -1,0 +1,12 @@
+{
+    "name": "fifofilewriter",
+    "parameter": {
+        "path": "",
+        "fileName": "",
+        "fieldDelimiter":"",
+        "dateFormat": "",
+        "writeMode": "",
+        "fifoCount": "",
+        "bufferSize": ""
+    }
+}
