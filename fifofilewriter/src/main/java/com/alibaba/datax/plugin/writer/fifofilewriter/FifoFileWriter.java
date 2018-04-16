@@ -49,7 +49,31 @@ public class FifoFileWriter extends Writer {
         @Override
         public void init() {
             this.writerSliceConfig = this.getPluginJobConf();
+        }
 
+        @Override
+        public void prepare() {
+        }
+
+        @Override
+        public void post() {
+        }
+
+        @Override
+        public void destroy() {
+            jobMap.remove(this.jobName);
+
+            // Close all fifos.
+            for (FIFO fifo: fifos) {
+                try {
+                    fifo.close();
+                } catch (Exception e) {
+                    LOG.warn("Could not close fifo", fifo);
+                }
+            }
+        }
+
+        private void configureFifos(int fifoCount) {
             // Get the buffer size; default is 768K
             int bufferSize = this.writerSliceConfig.getInt(Key.BUFFER_SIZE, 768*1024);
 
@@ -77,9 +101,21 @@ public class FifoFileWriter extends Writer {
             } else if ("truncate".equals(writeMode)) {
                 String fileName = this.writerSliceConfig.getNecessaryValue(com.alibaba.datax.plugin.unstructuredstorage.writer.Key.FILE_NAME, FifoFileWriterErrorCode.REQUIRED_VALUE);
 
+                // If configured to delete on start, do that now.
+                if ("true".equals(this.writerSliceConfig.getString(Key.DELETE_ON_START))) {
+                    for (File fifoFile: getFifoFiles(path)) {
+                        try {
+                            LOG.info("Deleting fifo: [{}]", fifoFile);
+                            FileUtils.forceDelete(fifoFile);
+                        } catch (IOException e) {
+                            throw DataXException.asDataXException(FifoFileWriterErrorCode.REMOVE_FIFO_ERROR, fifoFile.toString(), e);
+                        }
+                    }
+                }
+
                 // Create fifos.
-                int fifoCount = this.writerSliceConfig.getInt(Key.FIFO_COUNT, 5);
                 for (int i = 0; i < fifoCount; ++i) {
+
                     // If no template provided, just append #
                     String fifoName;
                     if (fileName.contains(FIFO_TEMPLATE)) {
@@ -88,17 +124,8 @@ public class FifoFileWriter extends Writer {
                         fifoName = String.format("%s__%d", fileName, i);
                     }
 
+                    // Create the fifo if it does not exist.
                     File fifoFile = new File(path, fifoName);
-                    if ("true".equals(this.writerSliceConfig.getString(Key.DELETE_ON_START))) {
-                        if (fifoFile.exists()) {
-                            try {
-                                LOG.info("Deleting fifo: [{}]", fifoFile);
-                                FileUtils.forceDelete(fifoFile);
-                            } catch (IOException e) {
-                                throw DataXException.asDataXException(FifoFileWriterErrorCode.REMOVE_FIFO_ERROR, fifoFile.toString(), e);
-                            }
-                        }
-                    }
                     if (!fifoFile.exists()) {
                         try {
                             LOG.info("Creating fifo: [{}]", fifoFile);
@@ -106,6 +133,8 @@ public class FifoFileWriter extends Writer {
                         } catch (IOException e) {
                             throw DataXException.asDataXException(FifoFileWriterErrorCode.CREATE_FIFO_ERROR, fifoFile.toString(), e);
                         }
+                    } else {
+                        LOG.info("Using existing fifo: [{}]", fifoFile);
                     }
 
                     FIFO fifo = new FIFO(fifoFile, bufferSize);
@@ -114,13 +143,8 @@ public class FifoFileWriter extends Writer {
                 }
             } else if ("append".equals(writeMode)) {
 
-                File[] fifoFiles = new File(path).listFiles(new FileFilter() {
-                    @Override
-                    public boolean accept(File file) {
-                        return !file.isFile() && !file.isDirectory();
-                    }
-                });
-                for (File fifoFile: fifoFiles) {
+                for (File fifoFile: getFifoFiles(path)) {
+                    LOG.info("Using existing fifo: [{}]", fifoFile);
                     FIFO fifo = new FIFO(fifoFile, bufferSize);
                     fifos.add(fifo);
                     fifoQueue.add(fifo);
@@ -137,30 +161,20 @@ public class FifoFileWriter extends Writer {
             }
         }
 
-        @Override
-        public void prepare() {
-        }
-
-        @Override
-        public void post() {
-        }
-
-        @Override
-        public void destroy() {
-            jobMap.remove(this.jobName);
-
-            // Close all fifos.
-            for (FIFO fifo: fifos) {
-                try {
-                    fifo.close();
-                } catch (Exception e) {
-                    LOG.warn("Could not close fifo", fifo);
-                }
-            }
+        private File[] getFifoFiles(String path) {
+            return new File(path).listFiles(new FileFilter() {
+                            @Override
+                            public boolean accept(File file) {
+                                return !file.isFile() && !file.isDirectory();
+                            }
+                        });
         }
 
         @Override
         public List<Configuration> split(int mandatoryNumber) {
+            // Configure the # of fifos, or allocate as needed.
+            configureFifos(mandatoryNumber);
+
             LOG.info("Begin split");
             List<Configuration> writerSplitConfigs = new ArrayList<Configuration>();
 
@@ -193,6 +207,7 @@ public class FifoFileWriter extends Writer {
         private final int bufferSize;
         private OutputStream targetStream;
         private OutputStream fifoStream;
+        private boolean allocated;
 
         private FIFO(File fifoFile, int bufferSize) {
             this.fifoFile = fifoFile;
@@ -200,6 +215,10 @@ public class FifoFileWriter extends Writer {
         }
 
         FIFO close() {
+            if (!this.allocated) {
+                // TODO: open then close can hang, so spawn a thread to do this and wait 1-5s.
+                open();
+            }
             if (this.targetStream != null) {
                 IOUtils.closeQuietly(this.targetStream);
             }
@@ -235,6 +254,11 @@ public class FifoFileWriter extends Writer {
             } catch (IOException e) {
                 throw DataXException.asDataXException(FifoFileWriterErrorCode.WRITE_FILE_IO_ERROR, fifoFile.toString(), e);
             }
+            return this;
+        }
+
+        FIFO allocated() {
+            this.allocated = true;
             return this;
         }
 

@@ -6,7 +6,7 @@
         "fieldDelimiter":"",
         "dateFormat": "",
         "writeMode": "",
-        "fifoCount": "",
-        "bufferSize": ""
+        "bufferSize": "",
+        "deleteOnStart": ""
     }
 }
