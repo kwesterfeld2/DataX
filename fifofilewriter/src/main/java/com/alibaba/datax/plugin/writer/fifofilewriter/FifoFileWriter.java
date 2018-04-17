@@ -37,7 +37,6 @@ public class FifoFileWriter extends Writer {
 
         private Configuration writerSliceConfig;
         private final String jobName;
-        private int fifoCount;
         private List<FIFO> fifos = new ArrayList<FIFO>();
         private BlockingQueue<FIFO> fifoQueue = new LinkedBlockingQueue<FIFO>();
 
@@ -49,6 +48,9 @@ public class FifoFileWriter extends Writer {
         @Override
         public void init() {
             this.writerSliceConfig = this.getPluginJobConf();
+
+            // Read the configuration for # of channels to hint fifoCount.
+            configureFifos();
         }
 
         @Override
@@ -73,7 +75,7 @@ public class FifoFileWriter extends Writer {
             }
         }
 
-        private void configureFifos(int fifoCount) {
+        private void configureFifos() {
             // Get the buffer size; default is 768K
             int bufferSize = this.writerSliceConfig.getInt(Key.BUFFER_SIZE, 768*1024);
 
@@ -114,6 +116,7 @@ public class FifoFileWriter extends Writer {
                 }
 
                 // Create fifos.
+                int fifoCount = this.writerSliceConfig.getInt(Key.FIFO_COUNT, 5);
                 for (int i = 0; i < fifoCount; ++i) {
 
                     // If no template provided, just append #
@@ -172,9 +175,6 @@ public class FifoFileWriter extends Writer {
 
         @Override
         public List<Configuration> split(int mandatoryNumber) {
-            // Configure the # of fifos, or allocate as needed.
-            configureFifos(mandatoryNumber);
-
             LOG.info("Begin split");
             List<Configuration> writerSplitConfigs = new ArrayList<Configuration>();
 
@@ -244,7 +244,7 @@ public class FifoFileWriter extends Writer {
                 }
             }
 
-            return this;
+            return allocated();
         }
 
         FIFO end() {
