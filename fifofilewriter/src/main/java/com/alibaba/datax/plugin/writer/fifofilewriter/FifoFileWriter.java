@@ -28,6 +28,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class FifoFileWriter extends Writer {
 
@@ -39,6 +40,7 @@ public class FifoFileWriter extends Writer {
         private final String jobName;
         private List<FIFO> fifos = new ArrayList<FIFO>();
         private BlockingQueue<FIFO> fifoQueue = new LinkedBlockingQueue<FIFO>();
+        private AtomicInteger splits = new AtomicInteger();
 
         public Job() {
             this.jobName = UUID.randomUUID().toString();
@@ -184,12 +186,14 @@ public class FifoFileWriter extends Writer {
                 writerSplitConfigs.add(splitConfiguration);
             }
             LOG.info("End split");
+            splits.set(mandatoryNumber);
             return writerSplitConfigs;
         }
 
         FIFO allocateFifo() {
             try {
-                return fifoQueue.take().open();
+                splits.decrementAndGet();
+                return fifoQueue.take().open().allocated();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
@@ -197,7 +201,12 @@ public class FifoFileWriter extends Writer {
         }
 
         void returnFifo(FIFO fifo) {
-            fifoQueue.add(fifo.end());
+            if(splits.get() <= 0) {
+                fifo.close();
+            } else {
+                fifoQueue.add(fifo.end());
+                LOG.info("Returned fifo {}; remaining tasks [{}]", fifo, splits);
+            }
         }
     }
 
@@ -220,6 +229,7 @@ public class FifoFileWriter extends Writer {
                 open();
             }
             if (this.targetStream != null) {
+                LOG.info("Closing fifo: {}", this);
                 IOUtils.closeQuietly(this.targetStream);
             }
             this.targetStream = null;
@@ -244,7 +254,7 @@ public class FifoFileWriter extends Writer {
                 }
             }
 
-            return allocated();
+            return this;
         }
 
         FIFO end() {
