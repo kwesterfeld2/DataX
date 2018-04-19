@@ -200,8 +200,8 @@ public class FifoFileWriter extends Writer {
             }
         }
 
-        void returnFifo(FIFO fifo) {
-            if(splits.get() <= 0) {
+        synchronized void returnFifo(FIFO fifo) {
+            if(splits.get() <= fifoQueue.size()) {
                 fifo.close();
             } else {
                 fifoQueue.add(fifo.end());
